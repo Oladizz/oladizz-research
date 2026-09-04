@@ -1,0 +1,5 @@
+google-cloud-firestore==2.14.0
+google-cloud-storage==2.14.0
+weasyprint==60.1
+markdown==3.5.2
+requests==2.31.0

@@ -1,0 +1,239 @@
+# Truth-Filtering Research Pipeline v2 — Cloud Workflows Definition
+# Orchestrates all stages in order, passing run_id and topic between steps.
+#
+# Deploy with:
+#   gcloud workflows deploy research-pipeline \
+#     --source=workflow.yaml \
+#     --location=us-central1
+
+main:
+  params: [args]
+  steps:
+    - init:
+        assign:
+          - project: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
+          - region: "us-central1"
+          - topic: ${args.topic}
+          - run_id: ${"run_" + text.substring(time.format(sys.now(), "UTC"), 0, 19) + "_" + text.substring(uuid.generate(), 0, 8)}
+
+    - log_start:
+        call: sys.log
+        args:
+          text: ${"Starting research pipeline for topic '" + topic + "' with run_id " + run_id}
+          severity: "INFO"
+
+    # ─── STAGE 1: Search & Discovery ─────────────────────
+    - stage1_search:
+        call: googleapis.run.v2.projects.locations.jobs.run
+        args:
+          name: ${"projects/" + project + "/locations/" + region + "/jobs/stage1-search"}
+          body:
+            overrides:
+              containerOverrides:
+                - env:
+                    - name: "RESEARCH_TOPIC"
+                      value: ${topic}
+                    - name: "RUN_ID"
+                      value: ${run_id}
+        result: stage1_result
+
+    - log_stage1:
+        call: sys.log
+        args:
+          text: ${"Stage 1 complete. Search & discovery finished for run " + run_id}
+          severity: "INFO"
+
+    # ─── STAGE 2: Queue Builder ──────────────────────────
+    - stage2_queue:
+        call: googleapis.run.v2.projects.locations.jobs.run
+        args:
+          name: ${"projects/" + project + "/locations/" + region + "/jobs/stage2-queue-builder"}
+          body:
+            overrides:
+              containerOverrides:
+                - env:
+                    - name: "RUN_ID"
+                      value: ${run_id}
+        result: stage2_result
+
+    - log_stage2:
+        call: sys.log
+        args:
+          text: ${"Stage 2 complete. Queues built for run " + run_id}
+          severity: "INFO"
+
+    # ─── STAGE 3: Wait for scraping to finish ────────────
+    # Cloud Tasks dispatches to the scraper service asynchronously.
+    # We poll Firestore to check if all URLs have been processed.
+    - stage3_wait_for_scraping:
+        call: poll_scraping_complete
+        args:
+          project: ${project}
+          run_id: ${run_id}
+        result: scraping_result
+
+    - log_stage3:
+        call: sys.log
+        args:
+          text: ${"Stage 3 complete. All URLs scraped for run " + run_id}
+          severity: "INFO"
+
+    # ─── STAGE 4: Dedup ──────────────────────────────────
+    - stage4_dedup:
+        call: googleapis.run.v2.projects.locations.jobs.run
+        args:
+          name: ${"projects/" + project + "/locations/" + region + "/jobs/stage4-dedup"}
+          body:
+            overrides:
+              containerOverrides:
+                - env:
+                    - name: "RUN_ID"
+                      value: ${run_id}
+                    - name: "RESEARCH_TOPIC"
+                      value: ${topic}
+        result: stage4_result
+
+    - log_stage4:
+        call: sys.log
+        args:
+          text: ${"Stage 4 complete. Dedup finished for run " + run_id}
+          severity: "INFO"
+
+    # ─── STAGE 5: Claim Extraction ───────────────────────
+    - stage5_extract:
+        call: googleapis.run.v2.projects.locations.jobs.run
+        args:
+          name: ${"projects/" + project + "/locations/" + region + "/jobs/stage5-extract"}
+          body:
+            overrides:
+              containerOverrides:
+                - env:
+                    - name: "RUN_ID"
+                      value: ${run_id}
+        result: stage5_result
+
+    - log_stage5:
+        call: sys.log
+        args:
+          text: ${"Stage 5 complete. Claims extracted for run " + run_id}
+          severity: "INFO"
+
+    # ─── STAGE 6: Clustering ─────────────────────────────
+    - stage6_cluster:
+        call: googleapis.run.v2.projects.locations.jobs.run
+        args:
+          name: ${"projects/" + project + "/locations/" + region + "/jobs/stage6-cluster"}
+          body:
+            overrides:
+              containerOverrides:
+                - env:
+                    - name: "RUN_ID"
+                      value: ${run_id}
+        result: stage6_result
+
+    - log_stage6:
+        call: sys.log
+        args:
+          text: ${"Stage 6 complete. Clustering finished for run " + run_id}
+          severity: "INFO"
+
+    # ─── STAGE 7+8: Scoring ──────────────────────────────
+    - stage7_scoring:
+        call: googleapis.run.v2.projects.locations.jobs.run
+        args:
+          name: ${"projects/" + project + "/locations/" + region + "/jobs/stage7-scoring"}
+          body:
+            overrides:
+              containerOverrides:
+                - env:
+                    - name: "RUN_ID"
+                      value: ${run_id}
+                    - name: "RESEARCH_TOPIC"
+                      value: ${topic}
+        result: stage7_result
+
+    - log_stage7:
+        call: sys.log
+        args:
+          text: ${"Stage 7-8 complete. Scoring finished for run " + run_id}
+          severity: "INFO"
+
+    # ─── STAGE 9+10: Delivery ────────────────────────────
+    - stage9_delivery:
+        call: googleapis.run.v2.projects.locations.jobs.run
+        args:
+          name: ${"projects/" + project + "/locations/" + region + "/jobs/stage9-delivery"}
+          body:
+            overrides:
+              containerOverrides:
+                - env:
+                    - name: "RUN_ID"
+                      value: ${run_id}
+                    - name: "RESEARCH_TOPIC"
+                      value: ${topic}
+        result: stage9_result
+
+    - log_complete:
+        call: sys.log
+        args:
+          text: ${"Pipeline complete for run " + run_id + ". PDF delivered."}
+          severity: "INFO"
+
+    - return_result:
+        return:
+          run_id: ${run_id}
+          topic: ${topic}
+          status: "complete"
+
+# ─── Helper: Poll Firestore until all scraping tasks are done ───
+poll_scraping_complete:
+  params: [project, run_id]
+  steps:
+    - check_loop:
+        call: http.get
+        args:
+          url: ${"https://firestore.googleapis.com/v1/projects/" + project + "/databases/(default)/documents:runQuery"}
+          headers:
+            Content-Type: "application/json"
+          body:
+            structuredQuery:
+              from:
+                - collectionId: "discovered_urls"
+              where:
+                compositeFilter:
+                  op: "AND"
+                  filters:
+                    - fieldFilter:
+                        field:
+                          fieldPath: "run_id"
+                        op: "EQUAL"
+                        value:
+                          stringValue: ${run_id}
+                    - fieldFilter:
+                        field:
+                          fieldPath: "status"
+                        op: "EQUAL"
+                        value:
+                          stringValue: "queued"
+        result: pending_check
+
+    - evaluate:
+        switch:
+          - condition: ${len(pending_check.body) > 1}
+            steps:
+              - wait:
+                  call: sys.sleep
+                  args:
+                    seconds: 30
+              - retry:
+                  call: poll_scraping_complete
+                  args:
+                    project: ${project}
+                    run_id: ${run_id}
+                  result: poll_result
+              - return_poll:
+                  return: ${poll_result}
+        next: done
+
+    - done:
+        return: "all_scraped"

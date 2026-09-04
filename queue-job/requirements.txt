@@ -1,0 +1,2 @@
+google-cloud-tasks==2.16.4
+google-cloud-firestore==2.16.0
