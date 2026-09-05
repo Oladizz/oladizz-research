@@ -117,7 +117,7 @@ class DomainCredibility:
 
     def to_dict(self):
         d = asdict(self)
-        del d['TYPE_MULTIPLIERS']
+        d.pop('TYPE_MULTIPLIERS', None)
         d['effective_score'] = self.effective_score()
         return d
 

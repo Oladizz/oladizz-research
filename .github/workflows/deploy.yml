@@ -1,0 +1,90 @@
+name: Deploy to Google Cloud
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'v2/**'
+
+env:
+  GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID != '' && secrets.GCP_PROJECT_ID || 'litetrack-1783858226' }}
+  REGION: us-central1
+  REPO_NAME: research-pipeline
+
+jobs:
+  deploy-infrastructure:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_CREDENTIALS }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev
+
+      # ==========================================
+      # 1. DEPLOY BATCH JOBS (CLOUD RUN JOBS)
+      # These wake up, do one task, and go to sleep.
+      # ==========================================
+      - name: Deploy Stage 1 (Search)
+        run: |
+          docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT }}/${{ env.REPO_NAME }}/stage1 ./v2/stage1_search
+          docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT }}/${{ env.REPO_NAME }}/stage1
+          gcloud run jobs update stage1-search --image ${{ env.REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT }}/${{ env.REPO_NAME }}/stage1 --region ${{ env.REGION }} --task-timeout 10m
+
+      - name: Deploy Stage 2 (Queue Builder)
+        run: |
+          docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT }}/${{ env.REPO_NAME }}/stage2 ./v2/stage2_queue_builder
+          docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT }}/${{ env.REPO_NAME }}/stage2
+          gcloud run jobs update stage2-queue --image ${{ env.REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT }}/${{ env.REPO_NAME }}/stage2 --region ${{ env.REGION }}
+
+      - name: Deploy Stages 4, 6, 7, 9 (Dedup, Cluster, Score, Deliver)
+        run: |
+          for stage in stage4_dedup stage6_cluster stage7_scoring stage9_delivery; do
+            docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT }}/${{ env.REPO_NAME }}/$stage ./v2/$stage
+            docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT }}/${{ env.REPO_NAME }}/$stage
+            gcloud run jobs update $(echo $stage | tr '_' '-') --image ${{ env.REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT }}/${{ env.REPO_NAME }}/$stage --region ${{ env.REGION }}
+          done
+
+      # ==========================================
+      # 2. DEPLOY ALWAYS-ON SERVICES (CLOUD RUN SERVICES)
+      # These listen for HTTP requests from Cloud Tasks.
+      # ==========================================
+      - name: Deploy Stage 3 (Scraper Service)
+        run: |
+          docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT }}/${{ env.REPO_NAME }}/stage3 ./v2/stage3_scraper
+          docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT }}/${{ env.REPO_NAME }}/stage3
+          gcloud run deploy scraper-service \
+            --image ${{ env.REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT }}/${{ env.REPO_NAME }}/stage3 \
+            --region ${{ env.REGION }} \
+            --allow-unauthenticated \
+            --max-instances 100 \
+            --concurrency 1
+
+      - name: Deploy Stage 5 (Extractor Service)
+        run: |
+          docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT }}/${{ env.REPO_NAME }}/stage5 ./v2/stage5_extract
+          docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT }}/${{ env.REPO_NAME }}/stage5
+          gcloud run deploy extractor-service \
+            --image ${{ env.REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT }}/${{ env.REPO_NAME }}/stage5 \
+            --region ${{ env.REGION }} \
+            --allow-unauthenticated \
+            --max-instances 10 \
+            --concurrency 5
+
+      # ==========================================
+      # 3. DEPLOY CLOUD WORKFLOWS (THE ORCHESTRATOR)
+      # ==========================================
+      - name: Deploy Workflows
+        run: |
+          gcloud workflows deploy research-pipeline-orchestrator \
+            --source=./v2/workflow.yaml \
+            --location=${{ env.REGION }}

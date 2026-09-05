@@ -83,6 +83,58 @@ def scrape():
     
     return "OK", 200
 
+def run_batch(run_id: str, limit: int = 50):
+    print(f"Running Stage 3 Batch Scraper for run: {run_id}")
+    urls_ref = db.collection(FS_DISCOVERED_URLS).where("run_id", "==", run_id).limit(limit)
+    docs = list(urls_ref.stream())
+    print(f"Found {len(docs)} discovered URLs to scrape.")
+    
+    scraped_count = 0
+    for doc in docs:
+        d = doc.to_dict()
+        url = d.get("url")
+        domain = d.get("domain")
+        print(f"Scraping: {url} ({domain})...")
+        
+        url_hash = hashlib.sha256(url.encode('utf-8')).hexdigest()
+        seen_ref = db.collection(FS_SEEN_HASHES).document(url_hash)
+        if seen_ref.get().exists:
+            print("  -> Already seen, skipping.")
+            continue
+            
+        try:
+            downloaded = trafilatura.fetch_url(url)
+            if not downloaded:
+                print("  -> Fetch failed.")
+                continue
+            text = trafilatura.extract(downloaded)
+            if not text:
+                print("  -> Extraction failed.")
+                continue
+                
+            simhash_val = compute_simhash(text)
+            seen_ref.set({"url": url, "added_at": firestore.SERVER_TIMESTAMP})
+            
+            page = ScrapedPage(
+                url=url,
+                domain=domain,
+                run_id=run_id,
+                url_hash=url_hash,
+                content_hash=simhash_val,
+                raw_text=text,
+                char_count=len(text)
+            )
+            db.collection(FS_SCRAPED_PAGES).add(page.to_dict())
+            scraped_count += 1
+            print(f"  -> Successfully scraped ({len(text)} chars).")
+        except Exception as e:
+            print(f"  -> Error: {e}")
+            
+    print(f"Stage 3 Batch complete. Successfully scraped {scraped_count} pages to Firestore.")
+
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port)
+    if os.environ.get("BATCH_MODE", "false").lower() == "true":
+        run_batch(os.environ.get("RUN_ID", "default-run"))
+    else:
+        port = int(os.environ.get("PORT", 8080))
+        app.run(host="0.0.0.0", port=port)

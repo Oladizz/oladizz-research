@@ -1,0 +1,11 @@
+
+# GCP Credentials
+gcp-key.json
+*.json
+!v2/**/package.json
+!v2/**/tsconfig.json
+*.pdf
+*.db
+report_*.md
+local_zero_ai_report.md
+__pycache__/

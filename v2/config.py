@@ -4,8 +4,13 @@ All stages import from here. One place to change model names, thresholds, etc.
 """
 import os
 
+# Automatically wire Google credentials if local key exists
+_local_key = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'gcp-key.json'))
+if os.path.exists(_local_key) and not os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = _local_key
+
 # ─── GCP Project ───────────────────────────────────────────
-GCP_PROJECT = os.environ.get("GCP_PROJECT", "oladizz-research")
+GCP_PROJECT = os.environ.get("GCP_PROJECT", "litetrack-1783858226")
 GCP_REGION = os.environ.get("GCP_REGION", "us-central1")
 
 # ─── Gemini Models (2026-current) ──────────────────────────

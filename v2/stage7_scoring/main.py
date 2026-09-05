@@ -21,6 +21,13 @@ def main(run_id):
     for doc in clusters_ref:
         data = doc.to_dict()
         clusters.append(ClaimCluster(**data))
+        
+    if not clusters:
+        # Fallback to run-specific collection
+        alt_ref = db.collection(f"run_{run_id}_clusters").stream()
+        for doc in alt_ref:
+            data = doc.to_dict()
+            clusters.append(ClaimCluster(**data))
 
     print(f"Loaded {len(clusters)} clusters to score.")
 
@@ -124,40 +131,41 @@ def main(run_id):
         
     print("Updated domain credibility.")
 
-    # 6. BigQuery Archive
-    dataset_ref = bq.dataset(BQ_DATASET)
+    # 6. BigQuery Archive (graceful fallback if BigQuery is unconfigured)
     try:
-        bq.get_dataset(dataset_ref)
-    except Exception:
-        bq.create_dataset(dataset_ref)
+        dataset_ref = bq.dataset(BQ_DATASET)
+        try:
+            bq.get_dataset(dataset_ref)
+        except Exception:
+            bq.create_dataset(dataset_ref)
 
-    # Simple schema auto-detect by passing dicts
-    if scored_claims:
-        claims_table_id = f"{GCP_PROJECT}.{BQ_DATASET}.{BQ_TABLE_CLAIMS}"
-        errors = bq.insert_rows_json(claims_table_id, [sc.to_dict() for sc in scored_claims])
+        if scored_claims:
+            claims_table_id = f"{GCP_PROJECT}.{BQ_DATASET}.{BQ_TABLE_CLAIMS}"
+            errors = bq.insert_rows_json(claims_table_id, [sc.to_dict() for sc in scored_claims])
+            if errors:
+                print(f"BigQuery claims insert errors: {errors}")
+            else:
+                print("Archived claims to BigQuery.")
+
+        runs_table_id = f"{GCP_PROJECT}.{BQ_DATASET}.{BQ_TABLE_RUNS}"
+        run_meta = {
+            "run_id": run_id,
+            "status": "scored",
+            "claims_above_threshold": len([c for c in scored_claims if c.confidence_score >= CONFIDENCE_THRESHOLD]),
+            "finished_at": datetime.utcnow().isoformat()
+        }
+        errors = bq.insert_rows_json(runs_table_id, [run_meta])
         if errors:
-            print(f"BigQuery claims insert errors: {errors}")
+            print(f"BigQuery runs insert errors: {errors}")
         else:
-            print("Archived claims to BigQuery.")
-
-    # We update run stats in BigQuery (creating dummy run metadata if not exists)
-    runs_table_id = f"{GCP_PROJECT}.{BQ_DATASET}.{BQ_TABLE_RUNS}"
-    run_meta = {
-        "run_id": run_id,
-        "status": "scored",
-        "claims_above_threshold": len([c for c in scored_claims if c.confidence_score >= CONFIDENCE_THRESHOLD]),
-        "finished_at": datetime.utcnow().isoformat()
-    }
-    errors = bq.insert_rows_json(runs_table_id, [run_meta])
-    if errors:
-        print(f"BigQuery runs insert errors: {errors}")
-    else:
-        print("Archived run metadata to BigQuery.")
+            print("Archived run metadata to BigQuery.")
+    except Exception as e:
+        print(f"BigQuery archive skipped/deferred: {e}")
         
     print("Stage 7+8 complete.")
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--run_id', required=True, help="Run ID")
+    parser.add_argument('--run_id', default=os.environ.get("RUN_ID", "default-run"), help="Run ID")
     args = parser.parse_args()
     main(args.run_id)
