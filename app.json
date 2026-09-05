@@ -1,0 +1,27 @@
+{
+  "name": "Truth-Filtering Research Engine",
+  "description": "Autonomous truth-corroborating intelligence pipeline that scrapes and verifies facts across independent domains.",
+  "repository": "https://github.com/Oladizz/oladizz-research",
+  "keywords": ["python", "research", "scraping", "nlp", "fact-checking", "spacy"],
+  "stack": "container",
+  "env": {
+    "USE_AI_EXTRACTION": {
+      "description": "Set to true to enable Gemini claim extraction",
+      "value": "false"
+    },
+    "USE_AI_CLUSTERING": {
+      "description": "Set to true to enable Gemini contradiction detection",
+      "value": "false"
+    },
+    "GEMINI_API_KEY": {
+      "description": "Optional Gemini API key for AI-augmented mode",
+      "required": false
+    }
+  },
+  "formation": {
+    "web": {
+      "quantity": 1,
+      "size": "eco"
+    }
+  }
+}

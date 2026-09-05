@@ -2,6 +2,8 @@
 # GCP Credentials
 gcp-key.json
 *.json
+!app.json
+!railway.json
 !v2/**/package.json
 !v2/**/tsconfig.json
 *.pdf

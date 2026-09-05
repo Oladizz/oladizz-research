@@ -1,0 +1,10 @@
+name = "oladizz-research-edge"
+main = "worker.js"
+compatibility_date = "2024-09-01"
+
+[vars]
+BACKEND_API_URL = "https://your-app.onrender.com"
+
+# Cloudflare Workers AI binding for edge-native inference
+[ai]
+binding = "AI"

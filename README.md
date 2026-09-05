@@ -7,10 +7,14 @@
 [![CI Pipeline](https://github.com/Oladizz/oladizz-research/actions/workflows/ci.yml/badge.svg)](https://github.com/Oladizz/oladizz-research/actions)
 [![Python 3.12](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![Google Cloud](https://img.shields.io/badge/GCP-Firestore%20%7C%20Cloud%20Run%20%7C%20Cloud%20Tasks-orange)](https://cloud.google.com/)
+[![Render](https://img.shields.io/badge/Deploy%20to-Render-46E3B7?logo=render&logoColor=white)](https://render.com/deploy?repo=https://github.com/Oladizz/oladizz-research)
+[![Railway](https://img.shields.io/badge/Deploy%20on-Railway-0B0D0E?logo=railway&logoColor=white)](https://railway.app/new)
+[![Heroku](https://img.shields.io/badge/Deploy%20to-Heroku-430098?logo=heroku&logoColor=white)](https://heroku.com/deploy?template=https://github.com/Oladizz/oladizz-research)
+[![Cloudflare](https://img.shields.io/badge/Edge-Cloudflare%20Workers-F38020?logo=cloudflare&logoColor=white)](https://workers.cloudflare.com/)
 [![Zero-AI Ready](https://img.shields.io/badge/Zero--AI%20Mode-%240.00%20Cost-brightgreen)](https://github.com/Oladizz/oladizz-research)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-[Architecture](#-architecture) • [Key Innovations](#-key-innovations) • [Stage Breakdown](#-pipeline-stages) • [Scoring Formula](#-confidence-scoring-engine) • [Quickstart](#-quickstart-guide)
+[Architecture](#-architecture) • [Multi-Platform Deploy](#-multi-platform-deployment) • [Key Innovations](#-key-innovations) • [Stage Breakdown](#-pipeline-stages) • [Quickstart](#-quickstart-guide)
 
 </div>
 
@@ -223,6 +227,48 @@ Verify all 36 unit tests for scoring algorithms, SimHash, URL normalization, and
 ```bash
 pytest v2/tests/ -v
 ```
+
+---
+
+## ☁️ Multi-Platform Deployment
+
+The Truth-Filtering Research Pipeline includes a **Universal Web & REST API Server** (`api_server.py`) complete with an interactive dashboard and background task processor. It is pre-configured for one-click deployment across all major cloud platforms:
+
+### 1. 🟣 Render
+* **Blueprint:** Configured in `render.yaml`.
+* **Deploy:** Connect your GitHub repository to [Render](https://render.com). Click **New +** -> **Blueprint**, and select this repository. It automatically builds the container and serves on your custom Render subdomain with automatic SSL.
+
+### 2. 🚂 Railway
+* **Configuration:** Configured in `railway.json`.
+* **Deploy:** In [Railway](https://railway.app), click **New Project** -> **Deploy from GitHub Repo**. Railway will auto-detect the root `Dockerfile`, provision an isolated container, and assign a public URL with zero manual configuration.
+
+### 3. 🛡️ Cloudflare Workers & Workers AI
+* **Configuration:** Located in `cloudflare/wrangler.toml` and `cloudflare/worker.js`.
+* **Deploy:**
+  ```bash
+  cd cloudflare
+  npm install -g wrangler
+  wrangler deploy
+  ```
+* **Features:**
+  * Serves as an ultra-low-latency edge reverse proxy and cache in front of your backend API.
+  * Includes edge endpoint `/api/edge/check-claim` powered by **Cloudflare Workers AI** (`@cf/meta/llama-3-8b-instruct`) for sub-second claim verification at the edge!
+
+### 4. 🟣 Heroku
+* **Manifest:** Configured in `app.json` and `Procfile`.
+* **Deploy:** Click the **Deploy to Heroku** button or run:
+  ```bash
+  heroku create oladizz-research-api --stack container
+  git push heroku main
+  ```
+
+### 5. 🐳 Docker & Self-Hosted VPS
+Run the standalone container on any server:
+```bash
+docker build -t oladizz-research .
+docker run -d -p 8080:8080 --name research-engine oladizz-research
+```
+Visit `http://localhost:8080` to access the interactive web dashboard.
 
 ---
 

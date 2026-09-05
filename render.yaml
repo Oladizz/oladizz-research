@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: oladizz-research-api
+    env: docker
+    plan: free
+    region: oregon
+    dockerfilePath: Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: USE_AI_EXTRACTION
+        value: "false"
+      - key: USE_AI_CLUSTERING
+        value: "false"
+      - key: GEMINI_API_KEY
+        sync: false
