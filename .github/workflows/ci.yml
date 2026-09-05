@@ -1,0 +1,23 @@
+name: CI Pipeline
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          pip install -r v2/requirements-dev.txt
+          python -m spacy download en_core_web_sm
+      - name: Lint with ruff
+        run: ruff check v2/
+      - name: Test with pytest
+        run: pytest v2/tests/ -v --tb=short --cov=v2 --cov-report=term-missing

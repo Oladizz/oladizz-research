@@ -1,3 +1,9 @@
+"""
+Stage 1 — Search & Discovery (Production, Zero-AI default)
+
+Uses template-based query expansion by default.
+Falls back to Gemini only if USE_AI_QUERY_EXPANSION=true is set.
+"""
 import os
 import sys
 import json
@@ -8,66 +14,94 @@ import requests
 from bs4 import BeautifulSoup
 
 from google.cloud import firestore
-import google.generativeai as genai
 
 # Import shared config and models
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from config import *
 from models import DiscoveredURL
 
+# Import zero-AI query expander
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'utils'))
+try:
+    from query_expander import expand_topic
+except ImportError:
+    expand_topic = None
+
+# Optional AI imports
+try:
+    import google.generativeai as genai
+    HAS_GENAI = True
+except ImportError:
+    HAS_GENAI = False
+
+
 def normalize_url(url: str) -> str:
-    """Normalize URL by stripping tracking params, trailing slashes, and fragments."""
+    """Normalize URL by stripping tracking params, www, trailing slashes, and fragments."""
     parsed = urlparse(url)
-    
+
+    # Lowercase the domain
+    netloc = parsed.netloc.lower()
+    if netloc.startswith('www.'):
+        netloc = netloc[4:]
+
     # Strip fragment
-    parsed = parsed._replace(fragment='')
-    
-    # Strip tracking params (e.g., utm_)
+    parsed = parsed._replace(fragment='', netloc=netloc)
+
+    # Strip tracking params (utm_*, fbclid, gclid, etc.)
     if parsed.query:
+        tracking_prefixes = ('utm_', 'fbclid', 'gclid', 'ref', 'source', 'campaign')
         qsl = parse_qsl(parsed.query)
-        filtered_qsl = [(k, v) for k, v in qsl if not k.startswith('utm_')]
+        filtered_qsl = [(k, v) for k, v in qsl if not any(k.startswith(p) for p in tracking_prefixes)]
         parsed = parsed._replace(query=urlencode(filtered_qsl))
-        
-    # Rebuild URL
+
     clean_url = urlunparse(parsed)
-    
+
     # Strip trailing slash
     if clean_url.endswith('/'):
         clean_url = clean_url[:-1]
-        
+
     return clean_url
 
-def expand_topic_queries(topic: str) -> list[str]:
-    """Expand topic into 10 diverse search queries using Gemini."""
+
+def expand_topic_code(topic: str, count: int = 15) -> list[str]:
+    """Expand topic using code-only synonym templates. Zero AI cost."""
+    if expand_topic is not None:
+        return expand_topic(topic, count)
+
+    # Inline fallback if utils not available yet
+    modifiers = ["best", "top", "essential", "critical", "guide", "checklist",
+                 "examples", "2026", "for business", "for startups"]
+    queries = [topic]
+    for mod in modifiers:
+        queries.append(f"{topic} {mod}")
+        if len(queries) >= count:
+            break
+    return queries[:count]
+
+
+def expand_topic_ai(topic: str) -> list[str]:
+    """Expand topic using Gemini. Costs AI tokens."""
+    if not HAS_GENAI or not GEMINI_API_KEY:
+        print("  AI expansion unavailable, falling back to code expansion.")
+        return expand_topic_code(topic)
+
     genai.configure(api_key=GEMINI_API_KEY)
     model = genai.GenerativeModel(MODEL_EXTRACT)
-    
-    prompt = f"""
-    You are an expert researcher. Expand the following research topic into exactly {SEARCH_QUERIES_PER_TOPIC} diverse search queries.
-    Include rephrasings, different angles, and relevant geographical variants if applicable.
-    Return ONLY a JSON array of strings. Do not include markdown code blocks or any other text.
-    
-    Topic: {topic}
-    """
-    
-    print("Calling Gemini to expand topic...")
-    response = model.generate_content(prompt)
-    time.sleep(GEMINI_FREE_TIER_DELAY) # Respect rate limits
-    
+
+    prompt = f"""Generate exactly {SEARCH_QUERIES_PER_TOPIC} diverse search queries to research: '{topic}'.
+Include rephrasings, different angles, and geographical variants.
+Return ONLY a JSON array of strings."""
+
     try:
-        text = response.text.strip()
-        if text.startswith("```json"):
-            text = text[7:-3].strip()
-        elif text.startswith("```"):
-            text = text[3:-3].strip()
-        
-        queries = json.loads(text)
-        if not isinstance(queries, list):
-            queries = [str(q) for q in queries]
+        response = model.generate_content(prompt,
+            generation_config=genai.GenerationConfig(response_mime_type="application/json"))
+        time.sleep(GEMINI_FREE_TIER_DELAY)
+        queries = json.loads(response.text)
         return queries[:SEARCH_QUERIES_PER_TOPIC]
     except Exception as e:
-        print(f"Error parsing Gemini response: {e}. Falling back to topic.")
-        return [topic]
+        print(f"  AI expansion failed: {e}. Falling back to code.")
+        return expand_topic_code(topic)
+
 
 def search_google_api(query: str) -> list[str]:
     """Search using Google Custom Search API."""
@@ -80,105 +114,118 @@ def search_google_api(query: str) -> list[str]:
             "q": query,
             "num": min(10, SEARCH_RESULTS_PER_QUERY)
         }
-        resp = requests.get(url, params=params)
+        resp = requests.get(url, params=params, timeout=10)
         resp.raise_for_status()
         data = resp.json()
         for item in data.get("items", []):
-            urls.append(item.get("link"))
+            link = item.get("link")
+            if link:
+                urls.append(link)
     except Exception as e:
-        print(f"Google API search failed for '{query}': {e}")
+        print(f"  Google API search failed for '{query}': {e}")
     return urls
+
 
 def search_ddg_html(query: str) -> list[str]:
     """Fallback: Scrape DuckDuckGo HTML."""
     urls = []
     try:
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
         data = {'q': query}
-        resp = requests.post(DDG_URL, data=data, headers=headers)
+        resp = requests.post(DDG_URL, data=data, headers=headers, timeout=15)
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, 'html.parser')
-        
+
         for a in soup.select('.result__url'):
             href = a.get('href')
             if href:
                 if href.startswith('//'):
                     urls.append('https:' + href)
-                else:
+                elif href.startswith('http'):
                     urls.append(href)
     except Exception as e:
-        print(f"DDG search failed for '{query}': {e}")
-    
+        print(f"  DDG search failed for '{query}': {e}")
+
     return urls[:DDG_RESULTS_PER_QUERY]
+
 
 def main():
     topic = os.environ.get("RESEARCH_TOPIC")
     run_id = os.environ.get("RUN_ID")
-    
+
     if not topic or not run_id:
         print("Error: RESEARCH_TOPIC and RUN_ID must be set.")
         sys.exit(1)
-        
-    print(f"Starting Stage 1 for run '{run_id}', topic: '{topic}'")
-    
-    queries = expand_topic_queries(topic)
+
+    print(f"=== STAGE 1: Search & Discovery ===")
+    print(f"Run: {run_id} | Topic: '{topic}'")
+
+    # Decide: code-only or AI-assisted query expansion
+    use_ai = os.environ.get("USE_AI_QUERY_EXPANSION", "false").lower() == "true"
+    if use_ai:
+        print("Mode: AI-assisted query expansion (costs tokens)")
+        queries = expand_topic_ai(topic)
+    else:
+        print("Mode: Code-only query expansion (zero cost)")
+        queries = expand_topic_code(topic)
+
     print(f"Generated {len(queries)} queries:")
     for i, q in enumerate(queries):
         print(f"  {i+1}. {q}")
-        
+
+    # Initialize Firestore
     db = firestore.Client(project=GCP_PROJECT, database="(default)")
-    
+
     unique_urls = {}
-    
+
     for query in queries:
-        print(f"Searching for: {query}")
-        
+        print(f"\nSearching: '{query}'...")
+
         if SEARCH_API_KEY and SEARCH_ENGINE_ID:
             urls = search_google_api(query)
         else:
             urls = search_ddg_html(query)
-            
+
         print(f"  Found {len(urls)} URLs")
-        
+
         for u in urls:
             norm_url = normalize_url(u)
             if norm_url not in unique_urls:
                 unique_urls[norm_url] = query
-                
+
         time.sleep(SEARCH_DELAY)
-        
-    print(f"Total unique URLs discovered: {len(unique_urls)}")
-    
-    # Save to Firestore
+
+    print(f"\nTotal unique URLs discovered: {len(unique_urls)}")
+
+    # Save to Firestore in batches of 500
     batch = db.batch()
     batch_count = 0
-    
+
     for url, query in unique_urls.items():
-        domain = urlparse(url).netloc
-        
+        domain = urlparse(url).netloc.lower().replace("www.", "")
         url_hash = hashlib.sha256(url.encode('utf-8')).hexdigest()
-        
         doc_ref = db.collection(FS_DISCOVERED_URLS).document(url_hash)
-        
+
         discovered = DiscoveredURL(
             url=url,
             domain=domain,
             query_used=query,
             run_id=run_id
         )
-        
+
         batch.set(doc_ref, discovered.to_dict())
         batch_count += 1
-        
+
         if batch_count >= 500:
             batch.commit()
             batch = db.batch()
             batch_count = 0
-            
+
     if batch_count > 0:
         batch.commit()
-        
-    print("Stage 1 complete. Saved to Firestore.")
+
+    print(f"Stage 1 complete. {len(unique_urls)} URLs saved to Firestore.")
+
 
 if __name__ == "__main__":
     main()
