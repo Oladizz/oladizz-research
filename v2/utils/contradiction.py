@@ -26,7 +26,8 @@ def detect_contradictions(claims: List[Dict]) -> List[Dict]:
         if not subj:
             return "UNKNOWN"
         for existing_key in subject_groups.keys():
-            if existing_key == "UNKNOWN": continue
+            if existing_key == "UNKNOWN":
+                continue
             if difflib.SequenceMatcher(None, subj.lower(), existing_key.lower()).ratio() > 0.8:
                 return existing_key
         return subj

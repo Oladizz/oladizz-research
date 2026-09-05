@@ -42,8 +42,9 @@ def test_identical_texts_same_hash():
     assert hamming_distance(h1, h2) == 0
 
 def test_similar_texts_close_hash():
-    text1 = "the quick brown fox jumps over the lazy dog"
-    text2 = "the quick brown fox jumps over a lazy dog"
+    base = "the quick brown fox jumps over the lazy dog and runs through the forest with great speed and agility. " * 5
+    text1 = base + "The weather today was completely sunny."
+    text2 = base + "The weather today was remarkably sunny."
     h1 = simhash(text1)
     h2 = simhash(text2)
     dist = hamming_distance(h1, h2)

@@ -2,6 +2,7 @@
 robots.txt compliance checker.
 """
 import urllib.robotparser
+import urllib.request
 from urllib.parse import urlparse
 import threading
 
@@ -18,7 +19,6 @@ class RobotsChecker:
                 
         parser = urllib.robotparser.RobotFileParser()
         try:
-            import urllib.request
             req = urllib.request.Request(f"https://{domain}/robots.txt", headers={'User-Agent': self.user_agent})
             with urllib.request.urlopen(req, timeout=5) as response:
                 content = response.read().decode('utf-8')

@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - 'v2/**'
+  workflow_dispatch:
 
 env:
   GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID != '' && secrets.GCP_PROJECT_ID || 'litetrack-1783858226' }}
@@ -14,6 +15,7 @@ env:
 
 jobs:
   deploy-infrastructure:
+    if: "${{ secrets.GCP_CREDENTIALS != '' }}"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code

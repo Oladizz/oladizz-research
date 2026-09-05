@@ -1,0 +1,20 @@
+# Ruff configuration for Truth-Filtering Research Pipeline
+
+line-length = 120
+target-version = "py312"
+
+[lint]
+select = ["E", "F"]
+ignore = [
+    "E501",  # line too long
+    "E402",  # module level import not at top of file
+    "E722",  # do not use bare 'except'
+    "F403",  # star imports
+    "F405",  # undefined star imports
+    "F841",  # local variable assigned but never used
+]
+
+[lint.per-file-ignores]
+"__init__.py" = ["F401"]
+"v2/tests/*" = ["F401", "E731"]
+"v2/utils/*" = ["F401"]
