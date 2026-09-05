@@ -99,7 +99,7 @@ def main():
 
     use_ai = os.environ.get("USE_AI_CLUSTERING", "false").lower() == "true"
 
-    print(f"=== STAGE 6: Clustering & Contradiction Detection ===")
+    print("=== STAGE 6: Clustering & Contradiction Detection ===")
     print(f"Run: {run_id}")
     print(f"Mode: {'AI-assisted' if use_ai else 'Code-only (zero cost)'}")
 
@@ -178,7 +178,7 @@ def main():
         db.collection(clusters_col).document(cluster_id).set(cluster.to_dict())
         clusters_formed += 1
 
-    print(f"\nStage 6 complete.")
+    print("\nStage 6 complete.")
     print(f"  Clusters formed: {clusters_formed}")
     print(f"  Contradictions found: {contradictions_found}")
 

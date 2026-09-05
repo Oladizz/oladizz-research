@@ -155,42 +155,73 @@ pip install -r v2/requirements-dev.txt
 python -m spacy download en_core_web_sm
 ```
 
-### 2. Run 100% Free Locally ($0.00)
-Run the self-contained local runner using SQLite and local spaCy NLP:
+### Option 1: 100% Free / Zero-AI Mode ($0.00, No API Keys, No GCP)
+Run entirely on your laptop using DuckDuckGo, local spaCy NLP, and scikit-learn math:
 ```bash
 python run_local_zero_ai.py "Autonomous AI Agent Frameworks 2026"
 ```
-*Outputs: `local_zero_ai_report.md` with fully scored, clustered facts.*
+**What happens under the hood:**
+1. Expands search queries using synonym templates.
+2. Scrapes DuckDuckGo for top web articles.
+3. Uses local spaCy NER to extract factual claims (percentages, figures, dates, entities).
+4. Clusters identical facts across multiple websites using TF-IDF vector math.
+5. Saves data to local SQLite database (`local_zero_ai.db`) and exports `local_zero_ai_report.md`.
 
-### 3. Run Live with Google Cloud Firestore & Cloud Storage
-Authenticate your Google Cloud project or service account:
+---
+
+### Option 2: AI-Powered Local PDF Mode (With Gemini API Key)
+If you want Gemini 3.5 Flash-Lite to extract claims and compile a styled, magazine-grade PDF report locally:
+```bash
+# 1. Set your Gemini API Key
+export GEMINI_API_KEY="your-gemini-api-key"
+
+# 2. Run the local fallback app
+python fallback_local_app.py "Best polymarket trading bots"
+```
+**Outputs generated:**
+* `local_report.pdf` — Publication-quality WeasyPrint PDF with confidence scores.
+* `trusted_links.txt` — Plaintext list of all corroborated source URLs.
+* `local_research.db` — SQLite database storing raw claims and cosine clusters.
+
+---
+
+### Option 3: Run Live with Google Cloud Firestore & Cloud Storage
+Authenticate your Google Cloud service account to run distributed stages against GCP:
 ```bash
 export GOOGLE_APPLICATION_CREDENTIALS="path/to/your/gcp-key.json"
-export GCP_PROJECT="your-project-id"
+export GCP_PROJECT="litetrack-1783858226"
 export RESEARCH_TOPIC="Next-Generation Solid State Batteries"
 export RUN_ID="run-battery-001"
 
-# Step 1: Discover URLs
+# Step 1: Discover URLs (writes to Firestore discovered_urls)
 python v2/stage1_search/main.py
 
-# Step 2: Scrape Pages (Batch Mode)
+# Step 2: Scrape Pages in Batch (writes to Firestore scraped_pages)
 export BATCH_MODE="true"
 python v2/stage3_scraper/main.py
 
-# Step 3: Deduplicate & Relevance
+# Step 3: Deduplicate & Relevance Filter
 python v2/stage4_dedup/main.py
 
-# Step 4: Extract Facts
+# Step 4: Extract Factual Claims
 python v2/stage5_extract/main.py
 
-# Step 5: Cluster & Cross-Check
+# Step 5: Cluster & Cross-Check Contradictions
 python v2/stage6_cluster/main.py
 
-# Step 6: Score Claims
+# Step 6: Score Claims & Update Domain Credibility
 python v2/stage7_scoring/main.py --run_id=$RUN_ID
 
-# Step 7: Compile & Deliver PDF
+# Step 7: Compile & Deliver PDF (Uploads to Cloud Storage bucket)
 python v2/stage9_delivery/main.py --run_id=$RUN_ID --topic="$RESEARCH_TOPIC"
+```
+
+---
+
+### Option 4: Run the Test Suite
+Verify all 36 unit tests for scoring algorithms, SimHash, URL normalization, and clustering:
+```bash
+pytest v2/tests/ -v
 ```
 
 ---

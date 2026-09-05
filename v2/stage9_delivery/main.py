@@ -66,9 +66,9 @@ def main(run_id, topic):
 
     md_content = f"# Research Report: {topic}\n"
     md_content += f"**Date:** {datetime.utcnow().strftime('%Y-%m-%d')}\n\n"
-    md_content += f"## Executive Summary\n"
+    md_content += "## Executive Summary\n"
     md_content += f"Found {len(claims)} verified claims from {len(trusted_urls)} trusted sources.\n\n"
-    md_content += f"## Verified Claims\n"
+    md_content += "## Verified Claims\n"
     
     for c in claims[:MAX_CLAIMS_IN_REPORT]:
         badge = "🟢" if c.confidence_score >= 85 else "🟡"
@@ -76,7 +76,7 @@ def main(run_id, topic):
         md_content += f"- **Confidence:** {c.confidence_score:.1f}%\n"
         md_content += f"- **Sources ({c.independent_source_count}):** {', '.join(c.source_domains)}\n\n"
     
-    md_content += f"## Works Cited\n"
+    md_content += "## Works Cited\n"
     for i, url in enumerate(sorted(list(trusted_urls))):
         md_content += f"{i+1}. {url}\n"
 

@@ -5,7 +5,6 @@ Defines the shape of every record that flows through the pipeline.
 from dataclasses import dataclass, field, asdict
 from typing import List, Optional
 from datetime import datetime
-import json
 
 
 @dataclass

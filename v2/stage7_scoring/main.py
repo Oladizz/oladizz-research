@@ -6,7 +6,7 @@ from datetime import datetime
 # Import shared config and models
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from config import *
-from models import ClaimCluster, DomainCredibility, ScoredClaim, ResearchRun
+from models import ClaimCluster, DomainCredibility, ScoredClaim
 
 from google.cloud import firestore
 from google.cloud import bigquery

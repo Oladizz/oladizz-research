@@ -6,7 +6,6 @@ import google.generativeai as genai
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from config import *
-from models import ScrapedPage
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'utils'))
 try:

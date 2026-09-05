@@ -117,7 +117,7 @@ def main():
 
     use_ai = os.environ.get("USE_AI_EXTRACTION", "false").lower() == "true"
 
-    print(f"=== STAGE 5: Claim Extraction ===")
+    print("=== STAGE 5: Claim Extraction ===")
     print(f"Run: {run_id}")
     print(f"Mode: {'AI-assisted (costs tokens)' if use_ai else 'Code-only (zero cost)'}")
 

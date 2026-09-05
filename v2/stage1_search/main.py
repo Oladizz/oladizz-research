@@ -157,7 +157,7 @@ def main():
         print("Error: RESEARCH_TOPIC and RUN_ID must be set.")
         sys.exit(1)
 
-    print(f"=== STAGE 1: Search & Discovery ===")
+    print("=== STAGE 1: Search & Discovery ===")
     print(f"Run: {run_id} | Topic: '{topic}'")
 
     # Decide: code-only or AI-assisted query expansion
