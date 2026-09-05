@@ -102,3 +102,4 @@ def generate_run_id():
     ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     short_uuid = uuid.uuid4().hex[:8]
     return f"run_{ts}_{short_uuid}"
+MAX_URLS_PER_RUN = 20000

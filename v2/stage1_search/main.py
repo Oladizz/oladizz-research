@@ -197,11 +197,17 @@ def main():
 
     print(f"\nTotal unique URLs discovered: {len(unique_urls)}")
 
+    # Enforce Free Tier hard limit
+    url_items = list(unique_urls.items())
+    if len(url_items) > MAX_URLS_PER_RUN:
+        print(f"Capping at {MAX_URLS_PER_RUN} URLs to protect GCP Free Tier.")
+        url_items = url_items[:MAX_URLS_PER_RUN]
+
     # Save to Firestore in batches of 500
     batch = db.batch()
     batch_count = 0
 
-    for url, query in unique_urls.items():
+    for url, query in url_items:
         domain = urlparse(url).netloc.lower().replace("www.", "")
         url_hash = hashlib.sha256(url.encode('utf-8')).hexdigest()
         doc_ref = db.collection(FS_DISCOVERED_URLS).document(url_hash)
