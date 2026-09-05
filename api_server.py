@@ -7,7 +7,7 @@ import sys
 import uuid
 import threading
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from flask import Flask, request, jsonify, render_template_string, send_file
 
 # Add v2 and utils to python path
@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), 'v2',
 
 from utils.query_expander import expand_topic
 from utils.spacy_extractor import extract_claims_from_text
+from utils.ai_router import AIRouter
 try:
     from utils.hdbscan_cluster import cluster_claims
     HAS_HDBSCAN = True
@@ -69,13 +70,19 @@ def search_ddg(query: str, max_results: int = 5) -> list[str]:
         print(f"Search warning: {e}")
     return urls
 
-def execute_pipeline(run_id: str, topic: str, max_urls: int = 15):
+def execute_pipeline(run_id: str, topic: str, max_urls: int = 15, preferred_provider: str = ""):
     conn = get_db()
+    router = AIRouter(preferred_provider=preferred_provider)
     try:
-        RUNS[run_id] = {"status": "searching", "topic": topic, "progress": "Discovering URLs..."}
+        RUNS[run_id] = {
+            "status": "searching",
+            "topic": topic,
+            "mode": router.provider_label,
+            "progress": f"Discovering URLs (using {router.provider_label})..."
+        }
         
         # 1. Search & Discovery
-        queries = expand_topic(topic, count=4)
+        queries = router.expand_topic(topic, count=4)
         unique_urls = set()
         for q in queries:
             urls = search_ddg(q, max_results=3)
@@ -104,7 +111,7 @@ def execute_pipeline(run_id: str, topic: str, max_urls: int = 15):
                 from urllib.parse import urlparse
                 domain = urlparse(url).netloc.replace("www.", "")
                 
-                claims = extract_claims_from_text(text[:25000], url, domain)
+                claims = router.extract_claims(text[:25000], url, domain)
                 all_claims.extend(claims)
             except Exception as e:
                 print(f"Error scraping {url}: {e}")
@@ -132,7 +139,8 @@ def execute_pipeline(run_id: str, topic: str, max_urls: int = 15):
         # 4. Generate Report
         report_lines = [
             f"# Research Report: {topic}",
-            f"**Generated:** {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}  ",
+            f"**Generated:** {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}  ",
+            f"**Engine Mode:** {router.provider_label}  ",
             f"**Verified Claims:** {len(all_claims)} from {pages_scraped} source pages\n",
             "## Key Findings\n"
         ]
@@ -157,7 +165,7 @@ def execute_pipeline(run_id: str, topic: str, max_urls: int = 15):
                 INSERT OR REPLACE INTO runs 
                 (run_id, topic, status, mode, urls_discovered, pages_scraped, claims_extracted, clusters_formed, report_md, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (run_id, topic, "completed", "zero-ai", len(candidate_urls), pages_scraped, len(all_claims), len(clusters_indices), report_md, datetime.utcnow().isoformat()))
+            """, (run_id, topic, "completed", router.provider, len(candidate_urls), pages_scraped, len(all_claims), len(clusters_indices), report_md, datetime.now(timezone.utc).isoformat()))
             
         RUNS[run_id]["status"] = "completed"
         RUNS[run_id]["progress"] = "Research dossier ready!"
@@ -172,11 +180,15 @@ def execute_pipeline(run_id: str, topic: str, max_urls: int = 15):
 
 @app.route("/health")
 def health():
+    active_router = AIRouter()
     return jsonify({
         "status": "healthy",
         "service": "truth-filtering-research-pipeline",
         "version": "2.0.0",
-        "platform_support": ["render", "railway", "heroku", "gcp", "docker"]
+        "active_ai_provider": active_router.provider,
+        "active_ai_label": active_router.provider_label,
+        "supported_ais": ["openai", "anthropic", "gemini", "zero-ai-local"],
+        "platform_support": ["render", "railway", "heroku", "gcp", "cloudflare", "docker"]
     })
 
 @app.route("/api/research", methods=["POST"])
@@ -187,17 +199,20 @@ def start_research():
         return jsonify({"error": "Missing 'topic' field"}), 400
         
     max_urls = int(data.get("max_urls", 15))
+    preferred_provider = data.get("provider") or data.get("engine_mode") or ""
     run_id = f"run_{uuid.uuid4().hex[:8]}"
     
+    active_router = AIRouter(preferred_provider=preferred_provider)
     RUNS[run_id] = {
         "run_id": run_id,
         "topic": topic,
+        "mode": active_router.provider_label,
         "status": "queued",
-        "created_at": datetime.utcnow().isoformat()
+        "created_at": datetime.now(timezone.utc).isoformat()
     }
     
     # Run in background thread
-    t = threading.Thread(target=execute_pipeline, args=(run_id, topic, max_urls))
+    t = threading.Thread(target=execute_pipeline, args=(run_id, topic, max_urls, preferred_provider))
     t.daemon = True
     t.start()
     
@@ -205,6 +220,7 @@ def start_research():
         "message": "Research run started successfully",
         "run_id": run_id,
         "topic": topic,
+        "mode": active_router.provider_label,
         "status_url": f"/api/research/{run_id}",
         "report_url": f"/api/research/{run_id}/report"
     }), 202
@@ -242,6 +258,7 @@ def get_report(run_id):
 
 @app.route("/")
 def dashboard():
+    active_router = AIRouter()
     html = """
     <!DOCTYPE html>
     <html lang="en">
@@ -263,6 +280,9 @@ def dashboard():
             <div class="text-center mb-5">
                 <h1 class="fw-bold">🌐 Truth-Filtering Research Engine</h1>
                 <p class="text-secondary">Scrapes, cross-checks facts across independent domains, and compiles textbook-grade dossiers.</p>
+                <div class="mt-2">
+                    <span class="badge bg-secondary p-2">Active AI: <strong class="text-info">{{ active_ai_label }}</strong></span>
+                </div>
             </div>
             
             <div class="card p-4 shadow-lg mb-4">
@@ -277,10 +297,13 @@ def dashboard():
                             <input type="number" id="maxUrls" class="form-control bg-dark text-light border-secondary" value="15" min="5" max="100">
                         </div>
                         <div class="col-md-6">
-                            <label class="form-label">Engine Mode</label>
+                            <label class="form-label">AI Engine Provider</label>
                             <select id="engineMode" class="form-select bg-dark text-light border-secondary">
-                                <option value="zero-ai">Zero-AI Mode ($0.00 Cost - spaCy & TF-IDF)</option>
-                                <option value="ai">AI-Augmented (Gemini)</option>
+                                <option value="">Auto-Detect ({{ active_ai_label }})</option>
+                                <option value="none">Zero-AI Local Mode ($0.00 - spaCy & TF-IDF)</option>
+                                <option value="openai">ChatGPT / OpenAI (GPT-4o-mini)</option>
+                                <option value="anthropic">Claude / Anthropic (Claude 3.5 Haiku)</option>
+                                <option value="gemini">Google Gemini (Gemini 3.5 Flash-Lite)</option>
                             </select>
                         </div>
                     </div>
@@ -311,6 +334,7 @@ def dashboard():
                 e.preventDefault();
                 const topic = document.getElementById('topicInput').value;
                 const maxUrls = document.getElementById('maxUrls').value;
+                const engineMode = document.getElementById('engineMode').value;
                 const btn = document.getElementById('submitBtn');
                 
                 btn.disabled = true;
@@ -319,7 +343,7 @@ def dashboard():
                 const res = await fetch('/api/research', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({topic, max_urls: maxUrls})
+                    body: JSON.stringify({topic, max_urls: maxUrls, provider: engineMode})
                 });
                 const data = await res.json();
                 currentRunId = data.run_id;
@@ -365,7 +389,7 @@ def dashboard():
     </body>
     </html>
     """
-    return render_template_string(html)
+    return render_template_string(html, active_ai_label=active_router.provider_label)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))

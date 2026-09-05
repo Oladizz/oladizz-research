@@ -26,12 +26,12 @@ try:
 except ImportError:
     HAS_SPACY_EXTRACTOR = False
 
-# Optional AI
+# Optional AI Router (OpenAI, Claude, Gemini)
 try:
-    import google.generativeai as genai
-    HAS_GENAI = True
+    from ai_router import AIRouter
+    HAS_AI_ROUTER = True
 except ImportError:
-    HAS_GENAI = False
+    HAS_AI_ROUTER = False
 
 
 def extract_claims_code(text: str, source_url: str, source_domain: str) -> List[dict]:
@@ -115,19 +115,15 @@ def main():
         print("Error: RUN_ID environment variable is required.")
         sys.exit(1)
 
-    use_ai = os.environ.get("USE_AI_EXTRACTION", "false").lower() == "true"
+    router = AIRouter() if HAS_AI_ROUTER else None
+    active_provider = router.provider if router else "none"
+    use_ai = (os.environ.get("USE_AI_EXTRACTION", "false").lower() == "true") or (active_provider != "none")
 
     print("=== STAGE 5: Claim Extraction ===")
     print(f"Run: {run_id}")
-    print(f"Mode: {'AI-assisted (costs tokens)' if use_ai else 'Code-only (zero cost)'}")
+    print(f"Engine: {router.provider_label if router else 'Zero-AI Local Code'}")
 
     db = firestore.Client(project=GCP_PROJECT, database="(default)")
-
-    # Set up AI model if requested
-    ai_model = None
-    if use_ai and HAS_GENAI and GEMINI_API_KEY:
-        genai.configure(api_key=GEMINI_API_KEY)
-        ai_model = genai.GenerativeModel(MODEL_EXTRACT)
 
     # Read scraped pages
     pages_ref = db.collection(FS_SCRAPED_PAGES)
@@ -153,9 +149,8 @@ def main():
         print(f"Processing page {i+1}/{len(docs)}: {url}")
 
         # Extract claims
-        if use_ai and ai_model:
-            claims = extract_claims_ai(raw_text, url, domain, ai_model)
-            time.sleep(GEMINI_FREE_TIER_DELAY)  # Rate limit
+        if router:
+            claims = router.extract_claims(raw_text, url, domain)
         else:
             claims = extract_claims_code(raw_text, url, domain)
 

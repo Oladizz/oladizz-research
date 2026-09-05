@@ -272,6 +272,32 @@ Visit `http://localhost:8080` to access the interactive web dashboard.
 
 ---
 
+## 🤖 Multi-Model AI Support (ChatGPT, Claude, Gemini & Zero-AI)
+
+The pipeline features an **Omni-AI Router** ([`v2/utils/ai_router.py`](file:///home/rabiuoladizz/oladizz-research/v2/utils/ai_router.py)) with zero-configuration automatic detection. Provide whichever API key you have, and the pipeline will automatically route query expansion, factual claim extraction, and contradiction detection to that model.
+
+| AI Provider | Trigger Key | Default Model | Fallback |
+|---|---|---|---|
+| **ChatGPT (OpenAI)** | `OPENAI_API_KEY` | `gpt-4o-mini` | Zero-AI Local Code ($0.00) |
+| **Claude (Anthropic)** | `ANTHROPIC_API_KEY` | `claude-3-5-haiku-20241022` | Zero-AI Local Code ($0.00) |
+| **Google Gemini** | `GEMINI_API_KEY` | `gemini-3.5-flash-lite` | Zero-AI Local Code ($0.00) |
+| **Zero-AI Local Mode** | *None (default)* | Local spaCy NER + TF-IDF | Pure Python ($0.00) |
+
+```bash
+# Example 1: Run with OpenAI ChatGPT
+export OPENAI_API_KEY="sk-proj-..."
+python3 api_server.py
+
+# Example 2: Run with Anthropic Claude
+export ANTHROPIC_API_KEY="sk-ant-..."
+python3 api_server.py
+
+# Example 3: When multiple keys exist, set your preference
+export PREFERRED_AI_PROVIDER="claude"  # "openai", "claude", or "gemini"
+```
+
+---
+
 ## ⚙️ Configuration & Environment Variables
 
 | Variable | Default | Purpose |
@@ -279,10 +305,13 @@ Visit `http://localhost:8080` to access the interactive web dashboard.
 | `GCP_PROJECT` | `litetrack-1783858226` | Google Cloud Project ID |
 | `GCP_REGION` | `us-central1` | Default GCP deployment region |
 | `MAX_URLS_PER_RUN` | `20000` | Safety cap to guarantee Firestore Free-Tier protection |
-| `USE_AI_QUERY_EXPANSION` | `false` | Set `true` to use Gemini for search queries |
-| `USE_AI_EXTRACTION` | `false` | Set `true` to use Gemini 3.5 Flash-Lite for claim extraction |
-| `USE_AI_CLUSTERING` | `false` | Set `true` to use Gemini 3.7 Flash for contradiction detection |
-| `GEMINI_API_KEY` | `""` | Gemini API Key (Optional in Zero-AI mode) |
+| `OPENAI_API_KEY` | `""` | OpenAI API Key (Enables GPT-4o / ChatGPT) |
+| `ANTHROPIC_API_KEY` | `""` | Anthropic API Key (Enables Claude 3.5 Haiku / Sonnet) |
+| `GEMINI_API_KEY` | `""` | Google Gemini API Key |
+| `PREFERRED_AI_PROVIDER` | `""` | Override provider preference (`openai`, `claude`, `gemini`) |
+| `OPENAI_MODEL` | `gpt-4o-mini` | Custom OpenAI model name |
+| `ANTHROPIC_MODEL` | `claude-3-5-haiku-20241022` | Custom Anthropic model name |
+| `GEMINI_MODEL` | `gemini-3.5-flash-lite` | Custom Google Gemini model name |
 | `TELEGRAM_BOT_TOKEN` | `""` | Telegram bot token for instant report alerts |
 | `TELEGRAM_CHAT_ID` | `""` | Telegram chat ID for delivery |
 
@@ -311,6 +340,7 @@ oladizz-research/
 │   ├── stage9_delivery/           # WeasyPrint PDF synthesis & GCS upload
 │   ├── tests/                     # Comprehensive test suite (80%+ coverage)
 │   └── utils/
+│       ├── ai_router.py           # Universal AI router (OpenAI, Claude, Gemini, Zero-AI)
 │       ├── contradiction.py       # Directional opposites & rule-based checks
 │       ├── cost_tracker.py        # Token & GCP resource expenditure tracking
 │       ├── credibility.py         # WHOIS domain age & TLD heuristic engine

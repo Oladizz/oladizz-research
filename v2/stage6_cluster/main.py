@@ -32,12 +32,12 @@ try:
 except ImportError:
     HAS_CONTRADICTION = False
 
-# Optional AI
+# Optional AI Router (OpenAI, Claude, Gemini)
 try:
-    import google.generativeai as genai
-    HAS_GENAI = True
+    from ai_router import AIRouter
+    HAS_AI_ROUTER = True
 except ImportError:
-    HAS_GENAI = False
+    HAS_AI_ROUTER = False
 
 
 def cluster_with_code(claims: List[dict]) -> List[List[int]]:
@@ -97,11 +97,13 @@ def main():
         print("Error: RUN_ID required.")
         sys.exit(1)
 
-    use_ai = os.environ.get("USE_AI_CLUSTERING", "false").lower() == "true"
+    router = AIRouter() if HAS_AI_ROUTER else None
+    active_provider = router.provider if router else "none"
+    use_ai = (os.environ.get("USE_AI_CLUSTERING", "false").lower() == "true") or (active_provider != "none")
 
     print("=== STAGE 6: Clustering & Contradiction Detection ===")
     print(f"Run: {run_id}")
-    print(f"Mode: {'AI-assisted' if use_ai else 'Code-only (zero cost)'}")
+    print(f"Engine: {router.provider_label if router else 'Zero-AI Local Code'}")
 
     db = firestore.Client(project=GCP_PROJECT, database="(default)")
 
@@ -114,12 +116,6 @@ def main():
     if not claims:
         print("No claims to cluster. Done.")
         return
-
-    # Set up AI if requested
-    ai_model = None
-    if use_ai and HAS_GENAI and GEMINI_API_KEY:
-        genai.configure(api_key=GEMINI_API_KEY)
-        ai_model = genai.GenerativeModel(MODEL_CLUSTER)
 
     # Cluster claims (HDBSCAN or fallback)
     print("Clustering claims...")
@@ -150,9 +146,8 @@ def main():
         contradicting = []
 
         if len(source_domains) >= 2:
-            if use_ai and ai_model:
-                result = check_contradictions_ai(cluster_claims_list, ai_model)
-                time.sleep(GEMINI_FREE_TIER_DELAY)
+            if router:
+                result = router.check_contradiction(cluster_claims_list)
             else:
                 result = check_contradictions_code(cluster_claims_list)
 
