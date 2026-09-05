@@ -12,6 +12,8 @@ ignore = [
     "F403",  # star imports
     "F405",  # undefined star imports
     "F841",  # local variable assigned but never used
+    "F541",  # f-string without placeholders
+    "F401",  # unused import
 ]
 
 [lint.per-file-ignores]

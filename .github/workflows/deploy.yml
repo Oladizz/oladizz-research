@@ -1,11 +1,6 @@
 name: Deploy to Google Cloud
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'v2/**'
   workflow_dispatch:
 
 env:
@@ -15,7 +10,6 @@ env:
 
 jobs:
   deploy-infrastructure:
-    if: "${{ secrets.GCP_CREDENTIALS != '' }}"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
