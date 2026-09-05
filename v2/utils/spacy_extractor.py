@@ -8,13 +8,17 @@ _nlp = None
 def get_nlp():
     global _nlp
     if _nlp is None:
-        import spacy
         try:
-            _nlp = spacy.load("en_core_web_sm")
-        except OSError:
-            import subprocess
-            subprocess.run(["python", "-m", "spacy", "download", "en_core_web_sm"])
-            _nlp = spacy.load("en_core_web_sm")
+            import spacy
+            try:
+                _nlp = spacy.load("en_core_web_sm")
+            except OSError:
+                import subprocess
+                subprocess.run(["python", "-m", "spacy", "download", "en_core_web_sm"])
+                _nlp = spacy.load("en_core_web_sm")
+        except Exception as e:
+            print(f"Warning: could not load spaCy: {e}. Using regex extraction fallback.")
+            _nlp = None
     return _nlp
 
 OPINION_MARKERS = [
@@ -36,7 +40,34 @@ def extract_claims_from_text(text: str, source_url: str, source_domain: str) -> 
     if not text:
         return []
         
+    text = text[:50000]
     nlp_model = get_nlp()
+    
+    if nlp_model is None:
+        claims = []
+        sentences = text.replace('\n', ' ').split('.')
+        for sent in sentences:
+            sentence = sent.strip()
+            if len(sentence.split()) < 8 or len(sentence.split()) > 60:
+                continue
+            if sentence.endswith('?'):
+                continue
+            lower_sent = sentence.lower()
+            if any(marker in lower_sent for marker in OPINION_MARKERS):
+                continue
+            if any(marker in lower_sent for marker in PROMOTIONAL_MARKERS):
+                continue
+            numbers = NUMBER_REGEX.findall(sentence)
+            if numbers:
+                claims.append({
+                    "claim": sentence,
+                    "subject": "",
+                    "numbers": list(set(numbers)),
+                    "source_url": source_url,
+                    "source_domain": source_domain
+                })
+        return claims
+
     doc = nlp_model(text)
     
     claims = []
