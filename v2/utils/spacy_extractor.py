@@ -1,13 +1,21 @@
+import numpy as np
 import re
-import spacy
 from typing import List, Dict
 
-try:
-    nlp = spacy.load("en_core_web_sm")
-except OSError:
-    import subprocess
-    subprocess.run(["python", "-m", "spacy", "download", "en_core_web_sm"])
-    nlp = spacy.load("en_core_web_sm")
+_nlp = None
+
+
+def get_nlp():
+    global _nlp
+    if _nlp is None:
+        import spacy
+        try:
+            _nlp = spacy.load("en_core_web_sm")
+        except OSError:
+            import subprocess
+            subprocess.run(["python", "-m", "spacy", "download", "en_core_web_sm"])
+            _nlp = spacy.load("en_core_web_sm")
+    return _nlp
 
 OPINION_MARKERS = [
     "i think", "i believe", "in my opinion", "arguably", 
@@ -28,8 +36,8 @@ def extract_claims_from_text(text: str, source_url: str, source_domain: str) -> 
     if not text:
         return []
         
-    text = text[:50000]
-    doc = nlp(text)
+    nlp_model = get_nlp()
+    doc = nlp_model(text)
     
     claims = []
     

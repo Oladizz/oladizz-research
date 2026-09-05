@@ -2,6 +2,7 @@
 Universal API & Web Dashboard Server for Truth-Filtering Research Pipeline.
 Deployable on Render, Railway, Heroku, Google Cloud Run, or Docker.
 """
+import numpy as np
 import os
 import sys
 import uuid
@@ -15,7 +16,6 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), 'v2')
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), 'v2', 'utils')))
 
 from utils.query_expander import expand_topic
-from utils.spacy_extractor import extract_claims_from_text
 from utils.ai_router import AIRouter
 try:
     from utils.hdbscan_cluster import cluster_claims
