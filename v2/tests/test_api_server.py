@@ -4,6 +4,8 @@ import sys
 
 # Ensure root is in sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+pytest.importorskip("flask")
+pytest.importorskip("trafilatura")
 from api_server import app
 
 

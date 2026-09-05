@@ -7,3 +7,6 @@ hdbscan>=0.8.33
 numpy>=1.26.0
 requests>=2.31.0
 python-whois>=0.9.4
+flask>=3.0.0
+trafilatura>=1.6.0
+beautifulsoup4>=4.12.0
