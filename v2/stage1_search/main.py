@@ -27,6 +27,11 @@ try:
 except ImportError:
     expand_topic = None
 
+try:
+    from search_engine import MultiSearchEngine
+except ImportError:
+    MultiSearchEngine = None
+
 # Optional AI imports
 try:
     import google.generativeai as genai
@@ -173,15 +178,21 @@ def main():
     for i, q in enumerate(queries):
         print(f"  {i+1}. {q}")
 
-    # Initialize Firestore
+    # Initialize Firestore & MultiSearchEngine
     db = firestore.Client(project=GCP_PROJECT, database="(default)")
+    search_engine = MultiSearchEngine(
+        google_api_key=SEARCH_API_KEY,
+        google_engine_id=SEARCH_ENGINE_ID
+    ) if MultiSearchEngine else None
 
     unique_urls = {}
 
     for query in queries:
         print(f"\nSearching: '{query}'...")
 
-        if SEARCH_API_KEY and SEARCH_ENGINE_ID:
+        if search_engine:
+            urls = search_engine.discover(query, target_count=SEARCH_RESULTS_PER_QUERY)
+        elif SEARCH_API_KEY and SEARCH_ENGINE_ID:
             urls = search_google_api(query)
         else:
             urls = search_ddg_html(query)

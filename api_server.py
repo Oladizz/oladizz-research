@@ -8,8 +8,11 @@ import sys
 import uuid
 import threading
 import sqlite3
+import json
+import io
+import time
 from datetime import datetime, timezone
-from flask import Flask, request, jsonify, render_template_string, send_file
+from flask import Flask, request, jsonify, render_template_string, send_file, Response
 
 # Add v2 and utils to python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), 'v2')))
@@ -17,6 +20,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), 'v2',
 
 from utils.query_expander import expand_topic
 from utils.ai_router import AIRouter
+from utils.search_engine import MultiSearchEngine
 try:
     from utils.hdbscan_cluster import cluster_claims
     HAS_HDBSCAN = True
@@ -56,19 +60,7 @@ def init_db():
         """)
 init_db()
 
-def search_ddg(query: str, max_results: int = 5) -> list[str]:
-    urls = []
-    try:
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-        resp = requests.post("https://html.duckduckgo.com/html/", data={'q': query}, headers=headers, timeout=10)
-        soup = BeautifulSoup(resp.text, 'html.parser')
-        for a in soup.select('.result__url')[:max_results]:
-            href = a.get('href')
-            if href:
-                urls.append('https:' + href if href.startswith('//') else href)
-    except Exception as e:
-        print(f"Search warning: {e}")
-    return urls
+search_engine = MultiSearchEngine()
 
 def execute_pipeline(run_id: str, topic: str, max_urls: int = 15, preferred_provider: str = ""):
     conn = get_db()
@@ -81,11 +73,11 @@ def execute_pipeline(run_id: str, topic: str, max_urls: int = 15, preferred_prov
             "progress": f"Discovering URLs (using {router.provider_label})..."
         }
         
-        # 1. Search & Discovery
+        # 1. Search & Discovery (Google API + Free fallbacks)
         queries = router.expand_topic(topic, count=4)
         unique_urls = set()
         for q in queries:
-            urls = search_ddg(q, max_results=3)
+            urls = search_engine.discover(q, target_count=4)
             unique_urls.update(urls)
             if len(unique_urls) >= max_urls:
                 break
@@ -256,6 +248,126 @@ def get_report(run_id):
         
     return report_md, 200, {"Content-Type": "text/markdown; charset=utf-8"}
 
+@app.route("/api/research/<run_id>/pdf")
+def get_pdf(run_id):
+    report_md = None
+    if run_id in RUNS and "report_md" in RUNS[run_id]:
+        report_md = RUNS[run_id]["report_md"]
+    else:
+        conn = get_db()
+        row = conn.execute("SELECT report_md FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+        if row and row["report_md"]:
+            report_md = row["report_md"]
+            
+    if not report_md:
+        return jsonify({"error": "Report not ready or run not found"}), 404
+        
+    try:
+        import markdown
+        import weasyprint
+        
+        html_body = markdown.markdown(report_md, extensions=['tables', 'fenced_code'])
+        full_html = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Research Dossier - {run_id}</title>
+<style>
+    @page {{
+        margin: 20mm;
+        size: A4;
+        @bottom-right {{
+            content: "Page " counter(page) " of " counter(pages);
+            font-size: 8pt;
+            color: #718096;
+        }}
+    }}
+    body {{
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        line-height: 1.6;
+        color: #1a202c;
+    }}
+    h1 {{
+        color: #1e3a8a;
+        border-bottom: 2px solid #3b82f6;
+        padding-bottom: 8px;
+        font-size: 22pt;
+        margin-bottom: 8px;
+    }}
+    h2 {{
+        color: #1e40af;
+        margin-top: 24px;
+        border-bottom: 1px solid #e2e8f0;
+        font-size: 15pt;
+        padding-bottom: 4px;
+    }}
+    h3 {{
+        color: #1e293b;
+        margin-top: 18px;
+        font-size: 12pt;
+    }}
+    p, li {{
+        font-size: 10pt;
+    }}
+    code {{
+        background: #f1f5f9;
+        padding: 2px 4px;
+        border-radius: 4px;
+        font-size: 8.5pt;
+    }}
+    hr {{
+        border: none;
+        border-top: 1px solid #e2e8f0;
+        margin: 16px 0;
+    }}
+</style>
+</head>
+<body>
+{html_body}
+</body>
+</html>"""
+        pdf_bytes = weasyprint.HTML(string=full_html).write_pdf()
+        return send_file(
+            io.BytesIO(pdf_bytes),
+            mimetype="application/pdf",
+            as_attachment=True,
+            download_name=f"research_report_{run_id}.pdf"
+        )
+    except Exception as e:
+        return jsonify({"error": f"Failed to generate PDF: {str(e)}"}), 500
+
+@app.route("/api/research/<run_id>/stream")
+def stream_status(run_id):
+    """Server-Sent Events (SSE) streaming endpoint for real-time pipeline monitoring."""
+    def event_stream():
+        while True:
+            data = None
+            if run_id in RUNS:
+                data = RUNS[run_id]
+            else:
+                conn = get_db()
+                row = conn.execute("SELECT * FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+                if row:
+                    data = dict(row)
+                    
+            if not data:
+                yield f"data: {json.dumps({'error': 'Run not found'})}\n\n"
+                break
+                
+            status = data.get("status")
+            yield f"data: {json.dumps(data)}\n\n"
+            
+            if status in ("completed", "failed"):
+                break
+                
+            time.sleep(1.0)
+
+    return Response(event_stream(), mimetype="text/event-stream", headers={
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no"
+    })
+
 @app.route("/")
 def dashboard():
     active_router = AIRouter()
@@ -319,16 +431,54 @@ def dashboard():
                 <p id="statusMsg" class="text-info fw-bold">Initializing...</p>
                 <div id="statsBox" class="text-secondary small mb-3"></div>
                 <div id="reportContainer" class="d-none mt-3">
-                    <h6>Generated Dossier:</h6>
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h6 class="mb-0">Generated Dossier:</h6>
+                        <div class="btn-group btn-group-sm" role="group">
+                            <button type="button" class="btn btn-outline-secondary active" id="filterAll" onclick="filterReport('all')">All</button>
+                            <button type="button" class="btn btn-outline-success" id="filterHigh" onclick="filterReport('high')">🟢 High (≥80%)</button>
+                            <button type="button" class="btn btn-outline-warning" id="filterMed" onclick="filterReport('med')">🟡 Medium (≥60%)</button>
+                        </div>
+                    </div>
                     <pre id="reportContent" style="white-space: pre-wrap; max-height: 400px; overflow-y: auto;"></pre>
-                    <a id="downloadBtn" class="btn btn-outline-info w-100" target="_blank">View Raw Markdown</a>
+                    <div class="d-flex gap-2">
+                        <a id="downloadPdfBtn" class="btn btn-primary flex-fill" target="_blank">📄 Download PDF</a>
+                        <a id="downloadBtn" class="btn btn-outline-info flex-fill" target="_blank">📝 View Raw Markdown</a>
+                    </div>
                 </div>
             </div>
         </div>
 
         <script>
             let currentRunId = null;
+            let eventSource = null;
             let pollInterval = null;
+            let rawReportMd = "";
+
+            function filterReport(level) {
+                document.querySelectorAll('.btn-group button').forEach(b => b.classList.remove('active'));
+                if (level === 'all') document.getElementById('filterAll').classList.add('active');
+                if (level === 'high') document.getElementById('filterHigh').classList.add('active');
+                if (level === 'med') document.getElementById('filterMed').classList.add('active');
+
+                if (!rawReportMd) return;
+                if (level === 'all') {
+                    document.getElementById('reportContent').innerText = rawReportMd;
+                    return;
+                }
+
+                const sections = rawReportMd.split('---');
+                const header = sections[0].split('## Key Findings')[0] + '## Key Findings\\n';
+                const filtered = [];
+                for (let i = 0; i < sections.length; i++) {
+                    const sec = sections[i];
+                    if (level === 'high' && sec.includes('🟢')) {
+                        filtered.push(sec);
+                    } else if (level === 'med' && (sec.includes('🟢') || sec.includes('🟡'))) {
+                        filtered.push(sec);
+                    }
+                }
+                document.getElementById('reportContent').innerText = header + filtered.join('---');
+            }
 
             document.getElementById('researchForm').addEventListener('submit', async (e) => {
                 e.preventDefault();
@@ -340,6 +490,9 @@ def dashboard():
                 btn.disabled = true;
                 btn.innerText = "Launching Pipeline...";
 
+                if (eventSource) { eventSource.close(); }
+                if (pollInterval) { clearInterval(pollInterval); }
+
                 const res = await fetch('/api/research', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -350,15 +503,41 @@ def dashboard():
 
                 document.getElementById('statusCard').classList.remove('d-none');
                 document.getElementById('statusMsg').innerText = "Pipeline started...";
+                document.getElementById('reportContainer').classList.add('d-none');
                 
-                pollInterval = setInterval(checkStatus, 2000);
+                if (window.EventSource) {
+                    initSSE(currentRunId);
+                } else {
+                    pollInterval = setInterval(checkStatus, 2000);
+                }
             });
+
+            function initSSE(runId) {
+                eventSource = new EventSource(`/api/research/${runId}/stream`);
+                eventSource.onmessage = (e) => {
+                    const data = JSON.parse(e.data);
+                    handleRunUpdate(data);
+                    if (data.status === 'completed' || data.status === 'failed') {
+                        eventSource.close();
+                    }
+                };
+                eventSource.onerror = () => {
+                    eventSource.close();
+                    pollInterval = setInterval(checkStatus, 2000);
+                };
+            }
 
             async function checkStatus() {
                 if (!currentRunId) return;
                 const res = await fetch(`/api/research/${currentRunId}`);
                 const data = await res.json();
+                handleRunUpdate(data);
+                if (data.status === 'completed' || data.status === 'failed') {
+                    clearInterval(pollInterval);
+                }
+            }
 
+            function handleRunUpdate(data) {
                 const pBar = document.getElementById('progressBar');
                 const sMsg = document.getElementById('statusMsg');
                 const stats = document.getElementById('statsBox');
@@ -373,14 +552,14 @@ def dashboard():
                     pBar.classList.remove('progress-bar-animated');
                     pBar.classList.add('bg-success');
                     sMsg.innerText = "Research Run Complete! ✅";
-                    clearInterval(pollInterval);
                     document.getElementById('submitBtn').disabled = false;
                     document.getElementById('submitBtn').innerText = "Start New Run";
 
-                    // Show Report
+                    rawReportMd = data.report_md;
                     document.getElementById('reportContainer').classList.remove('d-none');
-                    document.getElementById('reportContent').innerText = data.report_md;
+                    document.getElementById('reportContent').innerText = rawReportMd;
                     document.getElementById('downloadBtn').href = `/api/research/${currentRunId}/report`;
+                    document.getElementById('downloadPdfBtn').href = `/api/research/${currentRunId}/pdf`;
                 }
 
                 stats.innerText = `URLs: ${data.urls_discovered || 0} | Pages Scraped: ${data.pages_scraped || 0} | Facts Extracted: ${data.claims_extracted || 0}`;

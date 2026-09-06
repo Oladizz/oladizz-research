@@ -298,6 +298,53 @@ export PREFERRED_AI_PROVIDER="claude"  # "openai", "claude", or "gemini"
 
 ---
 
+## 🔎 Multi-Engine Search & Discovery (`MultiSearchEngine`)
+
+The discovery layer ([`v2/utils/search_engine.py`](file:///home/rabiuoladizz/oladizz-research/v2/utils/search_engine.py)) provides resilient, multi-source URL harvesting with automatic failover across free and premium providers:
+
+| Search Provider | Access Key / Setup | Characteristics | Cost |
+|---|---|---|---|
+| **Google Custom Search** | `GOOGLE_SEARCH_API_KEY` + `GOOGLE_SEARCH_ENGINE_ID` | Indexed web search with rank metadata | Free tier (100 queries/day) |
+| **DuckDuckGo HTML / Lite** | *None (Built-in)* | Scraping fallback without rate restrictions | $0.00 |
+| **Wikipedia Open API** | *None (Built-in)* | High domain-authority encyclopedia articles | $0.00 |
+| **arXiv Open Access API** | *None (Built-in)* | Scientific preprints (Computer Science, Physics, Math) | $0.00 |
+| **PubMed / NCBI PMC API** | *None (Built-in)* | Peer-reviewed biomedical & clinical research | $0.00 |
+| **Brave Search API** | `BRAVE_SEARCH_API_KEY` | Independent privacy-preserving web index | Free/Paid tier |
+
+---
+
+## 🖥️ Live Dashboard, SSE Streaming & PDF Export
+
+The integrated web interface and API server (`api_server.py`) provides full real-time visibility and instant document delivery:
+
+* **⚡ Server-Sent Events (SSE):** Stream progress live to the browser or external clients via `/api/research/<run_id>/stream` with sub-second status updates.
+* **📄 Direct WeasyPrint PDF Export:** Fetch publication-ready PDF research reports via `/api/research/<run_id>/pdf` complete with confidence badges, source lists, and works cited.
+* **🎯 Interactive Confidence Filtering:** Filter generated claims in real-time between **All**, **🟢 High Confidence ($\ge 80\%$)**, and **🟡 Medium Confidence ($\ge 60\%$)**.
+
+```bash
+# Start the web and API dashboard
+python3 api_server.py
+# Open http://localhost:8080 in your browser
+```
+
+---
+
+## 🤖 Interactive Telegram Bot Daemon
+
+Launch deep research runs and receive compiled PDF dossiers directly on your phone using the included Telegram daemon ([`v2/utils/telegram_bot.py`](file:///home/rabiuoladizz/oladizz-research/v2/utils/telegram_bot.py)):
+
+```bash
+export TELEGRAM_BOT_TOKEN="123456789:ABCdefGhIJKlmNoPQRstuVWXyz"
+python3 v2/utils/telegram_bot.py
+```
+
+### Available Bot Commands:
+* `/research <topic>` — Dispatches an autonomous research run in the background.
+* `/status <run_id>` — Shows live pipeline stage, URLs discovered, pages scraped, and claims extracted.
+* `/report <run_id>` — Sends an executive summary preview and directly uploads the WeasyPrint PDF document into the Telegram chat!
+
+---
+
 ## ⚙️ Configuration & Environment Variables
 
 | Variable | Default | Purpose |
@@ -305,6 +352,9 @@ export PREFERRED_AI_PROVIDER="claude"  # "openai", "claude", or "gemini"
 | `GCP_PROJECT` | `litetrack-1783858226` | Google Cloud Project ID |
 | `GCP_REGION` | `us-central1` | Default GCP deployment region |
 | `MAX_URLS_PER_RUN` | `20000` | Safety cap to guarantee Firestore Free-Tier protection |
+| `GOOGLE_SEARCH_API_KEY` | `""` | Google Custom Search JSON API Key |
+| `GOOGLE_SEARCH_ENGINE_ID` | `""` | Google Programmable Search Engine ID (`cx`) |
+| `BRAVE_SEARCH_API_KEY` | `""` | Optional Brave Search API Key |
 | `OPENAI_API_KEY` | `""` | OpenAI API Key (Enables GPT-4o / ChatGPT) |
 | `ANTHROPIC_API_KEY` | `""` | Anthropic API Key (Enables Claude 3.5 Haiku / Sonnet) |
 | `GEMINI_API_KEY` | `""` | Google Gemini API Key |
@@ -312,8 +362,8 @@ export PREFERRED_AI_PROVIDER="claude"  # "openai", "claude", or "gemini"
 | `OPENAI_MODEL` | `gpt-4o-mini` | Custom OpenAI model name |
 | `ANTHROPIC_MODEL` | `claude-3-5-haiku-20241022` | Custom Anthropic model name |
 | `GEMINI_MODEL` | `gemini-3.5-flash-lite` | Custom Google Gemini model name |
-| `TELEGRAM_BOT_TOKEN` | `""` | Telegram bot token for instant report alerts |
-| `TELEGRAM_CHAT_ID` | `""` | Telegram chat ID for delivery |
+| `TELEGRAM_BOT_TOKEN` | `""` | Telegram bot token for instant report alerts & bot daemon |
+| `TELEGRAM_CHAT_ID` | `""` | Telegram chat ID for delivery alerts |
 
 ---
 
@@ -325,12 +375,16 @@ oladizz-research/
 │   └── workflows/
 │       ├── ci.yml                 # Automated pytest, ruff linting
 │       └── deploy.yml             # Cloud Run & Workflows CI/CD
+├── api_server.py                  # Universal Web Dashboard, SSE Stream & PDF Server
+├── cloudflare/                    # Cloudflare Workers & Workers AI Edge Proxy
+├── archive/
+│   └── v1_prototype/              # Archived legacy v1 prototype microservices
 ├── v2/
 │   ├── config.py                  # Central configuration & thresholds
 │   ├── models.py                  # Strongly typed Dataclasses
 │   ├── deploy.sh                  # One-command GCP deployment script
 │   ├── workflow.yaml              # Cloud Workflows orchestrator
-│   ├── stage1_search/             # URL discovery & query expansion
+│   ├── stage1_search/             # URL discovery & multi-engine search
 │   ├── stage2_queue_builder/      # Cloud Tasks domain queue manager
 │   ├── stage3_scraper/            # Trafilatura + SimHash web scraper
 │   ├── stage4_dedup/              # SimHash Hamming & TF-IDF relevance
@@ -338,9 +392,11 @@ oladizz-research/
 │   ├── stage6_cluster/            # HDBSCAN clustering & contradiction detection
 │   ├── stage7_scoring/            # Credibility engine & confidence scoring
 │   ├── stage9_delivery/           # WeasyPrint PDF synthesis & GCS upload
-│   ├── tests/                     # Comprehensive test suite (80%+ coverage)
+│   ├── tests/                     # Comprehensive test suite (100% passing)
 │   └── utils/
 │       ├── ai_router.py           # Universal AI router (OpenAI, Claude, Gemini, Zero-AI)
+│       ├── search_engine.py       # Multi-provider search (Google, DDG, Wikipedia, arXiv, PubMed)
+│       ├── telegram_bot.py        # Interactive Telegram Bot daemon with PDF delivery
 │       ├── contradiction.py       # Directional opposites & rule-based checks
 │       ├── cost_tracker.py        # Token & GCP resource expenditure tracking
 │       ├── credibility.py         # WHOIS domain age & TLD heuristic engine
